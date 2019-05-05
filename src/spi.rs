@@ -43,6 +43,7 @@
 //! // Finalise expectations
 //! spi.done();
 //! ```
+use core::fmt::Debug;
 use embedded_hal::blocking::spi;
 use embedded_hal::spi::FullDuplex;
 use nb;
@@ -67,15 +68,18 @@ pub enum Mode {
 ///
 /// Models an SPI write or transfer (with response)
 #[derive(Clone, Debug, PartialEq)]
-pub struct Transaction {
+pub struct Transaction<W> {
     expected_mode: Mode,
-    expected_data: Vec<u8>,
-    response: Vec<u8>,
+    expected_data: Vec<W>,
+    response: Vec<W>,
 }
 
-impl Transaction {
+impl<W> Transaction<W>
+where
+    W: Clone,
+{
     /// Create a write transaction
-    pub fn write(expected: Vec<u8>) -> Transaction {
+    pub fn write(expected: Vec<W>) -> Transaction<W> {
         Transaction {
             expected_mode: Mode::Write,
             expected_data: expected,
@@ -84,7 +88,7 @@ impl Transaction {
     }
 
     /// Create a transfer transaction
-    pub fn transfer(expected: Vec<u8>, response: Vec<u8>) -> Transaction {
+    pub fn transfer(expected: Vec<W>, response: Vec<W>) -> Transaction<W> {
         Transaction {
             expected_mode: Mode::Transfer,
             expected_data: expected,
@@ -93,7 +97,7 @@ impl Transaction {
     }
 
     /// Create a transfer transaction
-    pub fn send(expected: u8) -> Transaction {
+    pub fn send(expected: W) -> Transaction<W> {
         Transaction {
             expected_mode: Mode::Send,
             expected_data: [expected].to_vec(),
@@ -101,7 +105,7 @@ impl Transaction {
         }
     }
     /// Create a transfer transaction
-    pub fn read(response: u8) -> Transaction {
+    pub fn read(response: W) -> Transaction<W> {
         Transaction {
             expected_mode: Mode::Read,
             expected_data: Vec::new(),
@@ -118,15 +122,18 @@ impl Transaction {
 /// faults.
 ///
 /// See the usage section in the module level docs for an example.
-pub type Mock = Generic<Transaction>;
+pub type Mock<W> = Generic<Transaction<W>>;
 
-impl spi::Write<u8> for Mock {
+impl<W> spi::Write<W> for Mock<W>
+where
+    W: Clone + Debug + PartialEq,
+{
     type Error = MockError;
 
     /// spi::Write implementation for Mock
     ///
     /// This will cause an assertion if the write call does not match the next expectation
-    fn write(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
+    fn write(&mut self, buffer: &[W]) -> Result<(), Self::Error> {
         let w = self.next().expect("no expectation for spi::write call");
         assert_eq!(w.expected_mode, Mode::Write, "spi::write unexpected mode");
         assert_eq!(
@@ -137,12 +144,15 @@ impl spi::Write<u8> for Mock {
     }
 }
 
-impl FullDuplex<u8> for Mock {
+impl<W> FullDuplex<W> for Mock<W>
+where
+    W: Clone + Debug + PartialEq,
+{
     type Error = MockError;
     /// spi::FullDuplex implementeation for Mock
     ///
     /// This will call the nonblocking read/write primitives.
-    fn send(&mut self, buffer: u8) -> nb::Result<(), Self::Error> {
+    fn send(&mut self, buffer: W) -> nb::Result<(), Self::Error> {
         let data = self.next().expect("no expectation for spi::send call");
         assert_eq!(data.expected_mode, Mode::Send, "spi::send unexpected mode");
         assert_eq!(
@@ -155,7 +165,7 @@ impl FullDuplex<u8> for Mock {
     /// spi::FullDuplex implementeation for Mock
     ///
     /// This will call the nonblocking read/write primitives.
-    fn read(&mut self) -> nb::Result<u8, Self::Error> {
+    fn read(&mut self) -> nb::Result<W, Self::Error> {
         let w = self.next().expect("no expectation for spi::read call");
         assert_eq!(w.expected_mode, Mode::Read, "spi::Read unexpected mode");
         assert_eq!(
@@ -163,17 +173,20 @@ impl FullDuplex<u8> for Mock {
             w.response.len(),
             "mismatched response length for spi::read"
         );
-        let buffer: u8 = w.response[0];
+        let buffer: W = w.response[0];
         Ok(buffer)
     }
 }
-impl spi::Transfer<u8> for Mock {
+impl<W> spi::Transfer<W> for Mock<W>
+where
+    W: Clone + Debug + PartialEq,
+{
     type Error = MockError;
 
     /// spi::Transfer implementation for Mock
     ///
     /// This writes the provided response to the buffer and will cause an assertion if the written data does not match the next expectation
-    fn transfer<'w>(&mut self, buffer: &'w mut [u8]) -> Result<&'w [u8], Self::Error> {
+    fn transfer<'w>(&mut self, buffer: &'w mut [W]) -> Result<&'w [W], Self::Error> {
         let w = self.next().expect("no expectation for spi::transfer call");
         assert_eq!(
             w.expected_mode,
